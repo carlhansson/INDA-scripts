@@ -4,9 +4,9 @@
 #
 set -uo pipefail
 
-MASTER_DIR="./0-master"               # folder holding <task-name>/ with the *Test.java files
-LIB_DIRS=("." "/usr/share/java")      # searched in order for junit*.jar and hamcrest*.jar
-TEST_TIMEOUT=10                       # seconds a single test may run before it counts as failed
+MASTER_DIR="./0-master"          # folder holding <task-name>/ with the *Test.java files
+LIB_DIRS=("." "/usr/share/java") # searched in order for junit*.jar and hamcrest*.jar
+TEST_TIMEOUT=10                  # seconds a single test may run before it counts as failed
 
 STUDENTS_FILE="students.txt"
 
@@ -35,55 +35,90 @@ EOF
 
 while getopts ':h' opt; do
     case "$opt" in
-        h) usage; exit 0 ;;
-        *) echo "Unknown option: -$OPTARG" >&2; usage >&2; exit 2 ;;
+        h)
+            usage
+            exit 0
+            ;;
+        *)
+            echo "Unknown option: -$OPTARG" >&2
+            usage >&2
+            exit 2
+            ;;
     esac
 done
 shift $((OPTIND - 1))
 
-(( $# >= 1 )) || { echo "Error: a task name is required." >&2; usage >&2; exit 2; }
+(($# >= 1)) || {
+    echo "Error: a task name is required." >&2
+    usage >&2
+    exit 2
+}
 TASK="$1"
 shift
 TEST_ROOT="$MASTER_DIR/$TASK"
 
-[[ -d "$TEST_ROOT" ]] || { echo "Error: no test folder $TEST_ROOT." >&2; exit 1; }
+[[ -d "$TEST_ROOT" ]] || {
+    echo "Error: no test folder $TEST_ROOT." >&2
+    exit 1
+}
 command -v javac >/dev/null && command -v java >/dev/null \
-    || { echo "Error: java/javac not found." >&2; exit 2; }
+    || {
+        echo "Error: java/javac not found." >&2
+        exit 2
+    }
 
-find_jars() {    # every jar matching $1 in the first of LIB_DIRS that has one
+find_jars() { # every jar matching $1 in the first of LIB_DIRS that has one
     local dir jar found=()
     for dir in "${LIB_DIRS[@]}"; do
         for jar in "$dir"/$1; do
             [[ -f "$jar" ]] && found+=("$(realpath "$jar")")
         done
-        (( ${#found[@]} )) && { printf '%s\n' "${found[@]}" | sort -u; return 0; }
+        ((${#found[@]})) && {
+            printf '%s\n' "${found[@]}" | sort -u
+            return 0
+        }
     done
     return 1
 }
 
-JUNIT=$(find_jars 'junit*.jar')       || { echo "Error: no junit*.jar in ${LIB_DIRS[*]}." >&2; exit 2; }
-HAMCREST=$(find_jars 'hamcrest*.jar') || { echo "Error: no hamcrest*.jar in ${LIB_DIRS[*]}." >&2; exit 2; }
+JUNIT=$(find_jars 'junit*.jar') || {
+    echo "Error: no junit*.jar in ${LIB_DIRS[*]}." >&2
+    exit 2
+}
+HAMCREST=$(find_jars 'hamcrest*.jar') || {
+    echo "Error: no hamcrest*.jar in ${LIB_DIRS[*]}." >&2
+    exit 2
+}
 CP=$(printf '%s\n' "$JUNIT" "$HAMCREST" | paste -sd: -)
 
-if (( $# )); then
+if (($#)); then
     STUDENTS=("$@")
 else
-    [[ -r "$STUDENTS_FILE" ]] || { echo "Error: no readable $STUDENTS_FILE in $PWD." >&2; exit 1; }
+    [[ -r "$STUDENTS_FILE" ]] || {
+        echo "Error: no readable $STUDENTS_FILE in $PWD." >&2
+        exit 1
+    }
     mapfile -t STUDENTS < <(
         sed -e 's/\r$//' -e 's/#.*//' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' \
             "$STUDENTS_FILE" | grep -v '^$' | awk '!seen[$0]++'
     )
-    (( ${#STUDENTS[@]} )) || { echo "Error: no student ids in $STUDENTS_FILE." >&2; exit 1; }
+    ((${#STUDENTS[@]})) || {
+        echo "Error: no student ids in $STUDENTS_FILE." >&2
+        exit 1
+    }
 fi
 
 mapfile -t TESTS < <(
     cd "$TEST_ROOT" && find . -name .git -prune -o -type f -name '*Test.java' -print | sed 's|^\./||' | sort
 )
-(( ${#TESTS[@]} )) || { echo "Error: no *Test.java files in $TEST_ROOT." >&2; exit 1; }
+((${#TESTS[@]})) || {
+    echo "Error: no *Test.java files in $TEST_ROOT." >&2
+    exit 1
+}
 
-declare -A EXPECTED    # @Test count per file, used when a test class can't run at all
+declare -A EXPECTED # @Test count per file, used when a test class can't run at all
 for rel in "${TESTS[@]}"; do
-    EXPECTED[$rel]=$(( $(grep -v '^[[:space:]]*//' "$TEST_ROOT/$rel" | grep -oE '@Test([^[:alnum:]_]|$)' | wc -l) ))
+    EXPECTED[$rel]=$(($(grep -v '^[[:space:]]*//' "$TEST_ROOT/$rel" | grep -oE '@Test([^[:alnum:]_]|$)' | wc -l)))
 done
 
 if [[ -t 1 ]]; then
@@ -102,7 +137,7 @@ trap 'rm -rf "$WORK"' EXIT
 # newlines, tabs and backslashes inside <error> are escaped as \n, \t and \\
 
 mkdir -p "$WORK/runner/testrunner"
-cat > "$WORK/runner/testrunner/Main.java" <<'JAVA'
+cat >"$WORK/runner/testrunner/Main.java" <<'JAVA'
 package testrunner;
 
 import java.io.OutputStream;
@@ -238,11 +273,14 @@ if ! err=$(javac -encoding UTF-8 -nowarn -d "$WORK/runner" -cp "$CP" "$WORK/runn
     exit 2
 fi
 
-with_timeout() {    # <seconds> <command...>, runs without a limit where coreutils timeout is missing
-    if command -v timeout >/dev/null; then timeout -k 5 "$@"; else shift; "$@"; fi
+with_timeout() { # <seconds> <command...>, runs without a limit where coreutils timeout is missing
+    if command -v timeout >/dev/null; then timeout -k 5 "$@"; else
+        shift
+        "$@"
+    fi
 }
 
-run_one() {    # <student> <test path relative to TEST_ROOT> <expected test count>
+run_one() { # <student> <test path relative to TEST_ROOT> <expected test count>
     local student="$1" rel="$2" expected="$3" repo="$1/$TASK"
     local dir target wanted found hint base
     dir=$(dirname "$rel")
@@ -257,30 +295,30 @@ run_one() {    # <student> <test path relative to TEST_ROOT> <expected test coun
         found=$(find "$repo" -name .git -prune -o -type f -name "$target" -print | sort | head -n 1)
         if [[ -z "$found" ]]; then
             hint=$(find "$repo" -name .git -prune -o -type f -iname "$target" -print | sort | head -n 1)
-            printf 'MISSING\t%s\t%s\n' "$wanted" "${hint#"$repo/"}" > "$base.out"
+            printf 'MISSING\t%s\t%s\n' "$wanted" "${hint#"$repo/"}" >"$base.out"
             return 0
         fi
-        printf 'MOVED\t%s\t%s\n' "${found#"$repo/"}" "$wanted" > "$base.out"
+        printf 'MOVED\t%s\t%s\n' "${found#"$repo/"}" "$wanted" >"$base.out"
     fi
 
     # -sourcepath is the student's folder only, so the master's own solutions are never picked up
     if ! javac -encoding UTF-8 -nowarn -d "$base.classes" -cp "$CP" \
-               -sourcepath "$(dirname "$found")" "$TEST_ROOT/$rel" > "$base.javac" 2>&1; then
-        echo "COMPILE" >> "$base.out"
+        -sourcepath "$(dirname "$found")" "$TEST_ROOT/$rel" >"$base.javac" 2>&1; then
+        echo "COMPILE" >>"$base.out"
         return 0
     fi
 
-    ( cd "$(dirname "$found")" &&
-      with_timeout $(( TEST_TIMEOUT * (expected + 2) + 30 )) \
-          java -Xmx512m -Djava.awt.headless=true -cp "$base.classes:$WORK/runner:$CP" \
-               testrunner.Main "$(basename "$rel" .java)" "$TEST_TIMEOUT" ) >> "$base.out" 2> "$base.err"
-    printf 'EXIT\t%s\n' "$?" >> "$base.out"
+    (cd "$(dirname "$found")" \
+        && with_timeout $((TEST_TIMEOUT * (expected + 2) + 30)) \
+            java -Xmx512m -Djava.awt.headless=true -cp "$base.classes:$WORK/runner:$CP" \
+            testrunner.Main "$(basename "$rel" .java)" "$TEST_TIMEOUT") >>"$base.out" 2>"$base.err"
+    printf 'EXIT\t%s\n' "$?" >>"$base.out"
 }
 
 export -f run_one with_timeout
 export TASK TEST_ROOT TEST_TIMEOUT WORK CP
 
-JOBS=$( { nproc || sysctl -n hw.ncpu; } 2>/dev/null || echo 4 )
+JOBS=$({ nproc || sysctl -n hw.ncpu; } 2>/dev/null || echo 4)
 [[ -t 2 ]] && PROGRESS=1 || PROGRESS=""
 export PROGRESS
 
@@ -301,45 +339,47 @@ done | xargs -0 -r -P "$JOBS" -n 3 bash -c 'run_one "$@"; [[ -z "$PROGRESS" ]] |
 
 # report
 
-report_test() {    # <student> <test path>: appends to SECTION and the student's S_* counts and notes
+report_test() { # <student> <test path>: appends to SECTION and the student's S_* counts and notes
     local student="$1" rel="$2" name base kind a b line lines total color
     local count="" passed=0 skipped=0 finished=0 exit_code="?" compiled=1
     local missing="" hint="" moved="" wanted="" stopped_in="" stopped_why="" where="" fails="" status="" detail=""
     name=$(basename "$rel" .java)
     base="$WORK/$student/${rel//\//__}"
 
-    [[ -f "$base.out" ]] || : > "$base.out"
+    [[ -f "$base.out" ]] || : >"$base.out"
     while IFS=$'\t' read -r kind a b; do
         case "$kind" in
             MISSING) missing="$a" hint="$b" ;;
-            MOVED)   moved="$a" wanted="$b" ;;
+            MOVED) moved="$a" wanted="$b" ;;
             COMPILE) compiled=0 ;;
-            COUNT)   count="$a" ;;
-            PASS)    (( passed++ )) ;;
-            SKIP)    (( skipped++ )) ;;
-            FAIL)    b=$(printf '%b' "$b")
-                     fails+="    ${RED}FAIL${R} $a"$'\n'"         ${b//$'\n'/$'\n'         }"$'\n' ;;
-            ABORT)   stopped_in="$a" stopped_why=$(printf '%b' "$b") ;;
-            DONE)    finished=1 ;;
-            EXIT)    exit_code="$a" ;;
+            COUNT) count="$a" ;;
+            PASS) ((passed++)) ;;
+            SKIP) ((skipped++)) ;;
+            FAIL)
+                b=$(printf '%b' "$b")
+                fails+="    ${RED}FAIL${R} $a"$'\n'"         ${b//$'\n'/$'\n'         }"$'\n'
+                ;;
+            ABORT) stopped_in="$a" stopped_why=$(printf '%b' "$b") ;;
+            DONE) finished=1 ;;
+            EXIT) exit_code="$a" ;;
         esac
-    done < "$base.out"
+    done <"$base.out"
 
-    total=$(( ${count:-${EXPECTED[$rel]}} - skipped ))
+    total=$((${count:-${EXPECTED[$rel]}} - skipped))
 
     if [[ -n "$missing" ]]; then
         status="missing $missing"
         [[ -n "$hint" ]] && status+=" (found $hint)"
         S_MISSING+=" ${missing##*/}"
-    elif (( ! compiled )); then
+    elif ((! compiled)); then
         status="compile error"
-        detail=$(< "$base.javac")
-        lines=$(wc -l < "$base.javac")
-        (( lines > 40 )) && detail="$(head -n 30 "$base.javac")"$'\n'"... ($(( lines - 30 )) more lines)"
+        detail=$(<"$base.javac")
+        lines=$(wc -l <"$base.javac")
+        ((lines > 40)) && detail="$(head -n 30 "$base.javac")"$'\n'"... ($((lines - 30)) more lines)"
         S_NOCOMPILE+=" $name"
-    elif (( ! finished )); then
+    elif ((! finished)); then
         [[ -n "$stopped_in" && "$stopped_in" != "?" ]] && where=" in $stopped_in"
-        if [[ "$exit_code" == 124 || "$exit_code" == 137 ]]; then    # timeout's SIGTERM also fires the ABORT hook
+        if [[ "$exit_code" == 124 || "$exit_code" == 137 ]]; then # timeout's SIGTERM also fires the ABORT hook
             status="killed$where: the run went over its time limit"
         elif [[ -n "$stopped_why" ]]; then
             status="stopped$where: $stopped_why"
@@ -352,21 +392,29 @@ report_test() {    # <student> <test path>: appends to SECTION and the student's
     [[ -n "$moved" ]] && S_MISPLACED+=" ${moved##*/}"
 
     color="$GREEN"
-    if [[ -n "$status" ]] || (( passed < total )); then color="$RED"; S_BAD=1; fi
-    (( total < passed )) && total=$passed
-    (( skipped )) && status+="${status:+, }$skipped ignored"
+    if [[ -n "$status" ]] || ((passed < total)); then
+        color="$RED"
+        S_BAD=1
+    fi
+    ((total < passed)) && total=$passed
+    ((skipped)) && status+="${status:+, }$skipped ignored"
 
     printf -v line '  %-*s  %s%5s%s%s\n' "$W" "$name" "$color" "$passed/$total" "${status:+  $status}" "$R"
     SECTION+="$line"
     [[ -n "$moved" ]] && SECTION+="    ${YELLOW}note: no $wanted, tested $moved instead${R}"$'\n'
     [[ -n "$detail" ]] && SECTION+="      ${detail//$'\n'/$'\n'      }"$'\n'
     SECTION+="$fails"
-    (( S_PASS += passed, S_TOTAL += total ))
+    ((S_PASS += passed, S_TOTAL += total))
 }
 
 SEP="${DIM}────────────────────────────────────────────────────────${R}"
-W=0;  for rel in "${TESTS[@]}"; do n=$(basename "$rel" .java); (( ${#n} > W )) && W=${#n}; done
-SW=0; for student in "${STUDENTS[@]}"; do (( ${#student} > SW )) && SW=${#student}; done
+W=0
+for rel in "${TESTS[@]}"; do
+    n=$(basename "$rel" .java)
+    ((${#n} > W)) && W=${#n}
+done
+SW=0
+for student in "${STUDENTS[@]}"; do ((${#student} > SW)) && SW=${#student}; done
 
 SUMMARY="" perfect=0
 
@@ -386,15 +434,15 @@ for student in "${STUDENTS[@]}"; do
     done
 
     color="$GREEN"
-    if (( S_BAD )); then color="$RED"; else (( perfect++ )); fi
+    if ((S_BAD)); then color="$RED"; else ((perfect++)); fi
     echo "${B}$student${R}  $color$S_PASS/$S_TOTAL tests passed$R"
     printf '%s\n' "$SECTION"
 
     notes=""
-    [[ -n "$S_MISSING" ]]    && notes+="; missing:$S_MISSING"
-    [[ -n "$S_NOCOMPILE" ]]  && notes+="; compile error:$S_NOCOMPILE"
+    [[ -n "$S_MISSING" ]] && notes+="; missing:$S_MISSING"
+    [[ -n "$S_NOCOMPILE" ]] && notes+="; compile error:$S_NOCOMPILE"
     [[ -n "$S_UNFINISHED" ]] && notes+="; did not finish:$S_UNFINISHED"
-    [[ -n "$S_MISPLACED" ]]  && notes+="; misplaced:$S_MISPLACED"
+    [[ -n "$S_MISPLACED" ]] && notes+="; misplaced:$S_MISPLACED"
     notes="${notes#; }"
     printf -v line '  %-*s  %s%5s%s%s\n' "$SW" "$student" "$color" "$S_PASS/$S_TOTAL" "${notes:+  $notes}" "$R"
     SUMMARY+="$line"

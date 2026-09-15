@@ -5,9 +5,9 @@
 #
 set -uo pipefail
 
-HOST="gits-15.sys.kth.se"    # GitHub Enterprise hostname
-ORG="inda-26"                # organization owning the repos
-PROTO="ssh"                  # "ssh" or "https"
+HOST="gits-15.sys.kth.se" # GitHub Enterprise hostname
+ORG="inda-26"             # organization owning the repos
+PROTO="ssh"               # "ssh" or "https"
 
 repo_path() {
     local student="$1" task="$2"
@@ -39,16 +39,33 @@ EOF
 while getopts ':rh' opt; do
     case "$opt" in
         r) RECLONE=1 ;;
-        h) usage; exit 0 ;;
-        *) echo "Unknown option: -$OPTARG" >&2; usage >&2; exit 2 ;;
+        h)
+            usage
+            exit 0
+            ;;
+        *)
+            echo "Unknown option: -$OPTARG" >&2
+            usage >&2
+            exit 2
+            ;;
     esac
 done
 shift $((OPTIND - 1))
 
 TASKS=("$@")
-(( ${#TASKS[@]} )) || { echo "Error: at least one task name is required." >&2; usage >&2; exit 2; }
-[[ -r "$STUDENTS_FILE" ]] || { echo "Error: no readable $STUDENTS_FILE in $PWD." >&2; exit 1; }
-command -v git >/dev/null || { echo "Error: git not found." >&2; exit 2; }
+((${#TASKS[@]})) || {
+    echo "Error: at least one task name is required." >&2
+    usage >&2
+    exit 2
+}
+[[ -r "$STUDENTS_FILE" ]] || {
+    echo "Error: no readable $STUDENTS_FILE in $PWD." >&2
+    exit 1
+}
+command -v git >/dev/null || {
+    echo "Error: git not found." >&2
+    exit 2
+}
 
 head_desc() {
     git -C "$1" log -1 --format='%h %cs' 2>/dev/null || echo "(empty repo — nothing pushed)"
@@ -69,7 +86,7 @@ fetch_one() {
         url="https://$HOST/$full.git"
     fi
 
-    (( RECLONE )) && rm -rf "$dir"
+    ((RECLONE)) && rm -rf "$dir"
 
     if [[ -d "$dir/.git" ]]; then
         if ! err=$(git -C "$dir" fetch --quiet --prune origin 2>&1); then
@@ -77,8 +94,8 @@ fetch_one() {
             return 1
         fi
         if git -C "$dir" symbolic-ref -q HEAD >/dev/null \
-           && git -C "$dir" rev-parse -q --verify '@{u}' >/dev/null 2>&1 \
-           && ! git -C "$dir" merge --ff-only --quiet '@{u}' 2>/dev/null; then
+            && git -C "$dir" rev-parse -q --verify '@{u}' >/dev/null 2>&1 \
+            && ! git -C "$dir" merge --ff-only --quiet '@{u}' 2>/dev/null; then
             printf '%-20s %-12s diverged (left alone)\n' "$student" "$task"
             return 0
         fi
@@ -101,13 +118,16 @@ mapfile -t STUDENTS < <(
     sed -e 's/\r$//' -e 's/#.*//' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' \
         "$STUDENTS_FILE" | grep -v '^$' | awk '!seen[$0]++'
 )
-(( ${#STUDENTS[@]} )) || { echo "Error: no student ids in $STUDENTS_FILE." >&2; exit 1; }
+((${#STUDENTS[@]})) || {
+    echo "Error: no student ids in $STUDENTS_FILE." >&2
+    exit 1
+}
 
-JOBS=$( { nproc || sysctl -n hw.ncpu; } 2>/dev/null || echo 4 )
-TOTAL=$(( ${#STUDENTS[@]} * ${#TASKS[@]} ))
+JOBS=$({ nproc || sysctl -n hw.ncpu; } 2>/dev/null || echo 4)
+TOTAL=$((${#STUDENTS[@]} * ${#TASKS[@]}))
 
 echo "${TASKS[*]}: ${#STUDENTS[@]} students, $TOTAL repos, $JOBS parallel jobs"
-(( RECLONE )) && echo "re-cloning from scratch"
+((RECLONE)) && echo "re-cloning from scratch"
 echo
 
 for task in "${TASKS[@]}"; do
@@ -118,7 +138,7 @@ done | xargs -0 -P "$JOBS" -n 2 bash -c 'fetch_one "$@"' _
 status=$?
 
 echo
-if (( status == 0 )); then
+if ((status == 0)); then
     echo "All $TOTAL repos fetched."
 else
     echo "Finished with failures — see the lines above."

@@ -71,12 +71,19 @@ mapfile -t STUDENTS < <(sed 's/#.*//' "$STUDENTS_FILE" | tr -d '\r' | awk 'NF &&
 JOBS=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 TOTAL=$((${#STUDENTS[@]} * ${#TASKS[@]}))
 
+if [[ -t 1 ]]; then
+  R=$(tput sgr0)
+  RED=$(tput setaf 1) GREEN=$(tput setaf 2) YELLOW=$(tput setaf 3)
+else
+  R='' RED='' GREEN='' YELLOW=''
+fi
+
 say() {
   printf '%-20s %-12s %s\n' "$@"
 }
 
 fail() {
-  say "$1" "$2" "FAILED"
+  say "$1" "$2" "${RED}FAILED${R}"
   sed 's/^/    /' <<<"$3"
   return 1
 }
@@ -86,7 +93,7 @@ head_desc() {
 }
 
 fetch_one() {
-  local student="$1" task="$2" dir="$1/$2" err
+  local student="$1" task="$2" dir="$1/$2" err before
 
   ((RECLONE)) && rm -rf "$dir"
 
@@ -96,7 +103,7 @@ fetch_one() {
       fail "$student" "$task" "$err"
       return 1
     }
-    say "$student" "$task" "cloned   $(head_desc "$dir")"
+    say "$student" "$task" "${GREEN}cloned${R}     $(head_desc "$dir")"
     return 0
   fi
 
@@ -105,16 +112,21 @@ fetch_one() {
     return 1
   }
 
+  before=$(git -C "$dir" rev-parse -q --verify HEAD)
   if ! git -C "$dir" rev-parse -q --verify '@{u}' >/dev/null 2>&1 ||
     git -C "$dir" merge --ff-only --quiet '@{u}' 2>/dev/null; then
-    say "$student" "$task" "updated  $(head_desc "$dir")"
+    if [[ "$(git -C "$dir" rev-parse -q --verify HEAD)" == "$before" ]]; then
+      say "$student" "$task" "${YELLOW}no changes${R} $(head_desc "$dir")"
+    else
+      say "$student" "$task" "${GREEN}updated${R}    $(head_desc "$dir")"
+    fi
   else
-    say "$student" "$task" "diverged (left alone)"
+    say "$student" "$task" "${RED}diverged (left alone)${R}"
   fi
 }
 
 export -f fetch_one say fail head_desc
-export BASE RECLONE GIT_TERMINAL_PROMPT=0
+export BASE RECLONE R RED GREEN YELLOW GIT_TERMINAL_PROMPT=0
 
 echo "${TASKS[*]}: ${#STUDENTS[@]} students, $TOTAL repos, $JOBS parallel jobs"
 ((RECLONE)) && echo "re-cloning from scratch"

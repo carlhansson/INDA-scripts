@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 #   ./push-feedback.sh task-1          review and push every issue in feedback/task-1.md
-#   ./push-feedback.sh -n task-1       dry run: show what would be pushed, push nothing
+#   ./push-feedback.sh -d task-1       dry run: show what would be pushed, push nothing
 #   ./push-feedback.sh -y task-1       no confirmation prompts (use with care)
 #
 set -uo pipefail
 
 HOST="gits-15.sys.kth.se"    # GitHub Enterprise hostname
 ORG="inda-26"                # organization owning the repos
-FEEDBACK_DIR="./feedback"    # folder holding <task-name>.md feedback files
+FEEDBACK_DIR="./0-feedback"    # folder holding <task-name>.md feedback files
 
 repo_path() {
     local student="$1" task="$2"
@@ -44,7 +44,7 @@ the next header line is that issue's body (in GitHub flavored markdown). For exa
 The header is #<student-id>#<issue title>. Ordinary markdown headings (\`# Heading\`, \`## Sub\`) shouldn't be mistaken for it since we don't have any spaces around them.
 
 Options:
-  -n    Dry run: print each issue but never create anything
+  -d    Dry run: print each issue but never create anything
   -y    Assume yes: skip the per-issue confirmation
   -h    Show this help
 
@@ -52,9 +52,9 @@ Host/org/feedback folder are set in the configuration block at the top.
 EOF
 }
 
-while getopts ':nyh' opt; do
+while getopts ':dyh' opt; do
     case "$opt" in
-        n) DRY_RUN=1 ;;
+        d) DRY_RUN=1 ;;
         y) ASSUME_YES=1 ;;
         h) usage; exit 0 ;;
         *) echo "Unknown option: -$OPTARG" >&2; usage >&2; exit 2 ;;

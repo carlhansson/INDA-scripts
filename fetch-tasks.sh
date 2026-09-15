@@ -5,20 +5,13 @@
 #
 set -uo pipefail
 
-HOST="gits-15.sys.kth.se" # GitHub Enterprise hostname
-ORG="inda-26"             # organization owning the repos
-PROTO="ssh"               # "ssh" or "https"
-
-repo_path() {
-    local student="$1" task="$2"
-    echo "$ORG/$student-$task"
-}
-
+HOST="gits-15.sys.kth.se"
+ORG="inda-26"
+PROTO="ssh"
 STUDENTS_FILE="students.txt"
-RECLONE=0
 
 usage() {
-    cat <<EOF
+  cat <<EOF
 Usage: ${0##*/} [-r] <task-name> [task-name ...]
 
 Clones each <task-name> for every student id listed in ./$STUDENTS_FILE
@@ -36,110 +29,106 @@ Host/org/naming are set in the configuration block at the top of the script.
 EOF
 }
 
+die() {
+  echo "Error: $1" >&2
+  exit 1
+}
+
+RECLONE=0
 while getopts ':rh' opt; do
-    case "$opt" in
-        r) RECLONE=1 ;;
-        h)
-            usage
-            exit 0
-            ;;
-        *)
-            echo "Unknown option: -$OPTARG" >&2
-            usage >&2
-            exit 2
-            ;;
-    esac
+  case "$opt" in
+    r) RECLONE=1 ;;
+    h)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown option: -$OPTARG" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
 done
 shift $((OPTIND - 1))
-
 TASKS=("$@")
-((${#TASKS[@]})) || {
-    echo "Error: at least one task name is required." >&2
-    usage >&2
-    exit 2
+
+(($#)) || {
+  usage >&2
+  exit 2
 }
-[[ -r "$STUDENTS_FILE" ]] || {
-    echo "Error: no readable $STUDENTS_FILE in $PWD." >&2
-    exit 1
+[[ -r "$STUDENTS_FILE" ]] || die "no readable $STUDENTS_FILE in $PWD."
+command -v git >/dev/null || die "git not found."
+
+if [[ "$PROTO" == "ssh" ]]; then
+  BASE="git@$HOST:$ORG"
+else
+  BASE="https://$HOST/$ORG"
+fi
+
+mapfile -t STUDENTS < <(sed 's/#.*//' "$STUDENTS_FILE" | tr -d '\r' | awk 'NF && !seen[$1]++ { print $1 }')
+((${#STUDENTS[@]})) || die "no student ids in $STUDENTS_FILE."
+
+JOBS=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
+TOTAL=$((${#STUDENTS[@]} * ${#TASKS[@]}))
+
+say() {
+  printf '%-20s %-12s %s\n' "$@"
 }
-command -v git >/dev/null || {
-    echo "Error: git not found." >&2
-    exit 2
+
+fail() {
+  say "$1" "$2" "FAILED"
+  sed 's/^/    /' <<<"$3"
+  return 1
 }
 
 head_desc() {
-    git -C "$1" log -1 --format='%h %cs' 2>/dev/null || echo "(empty repo — nothing pushed)"
-}
-
-report_err() {
-    printf '%-20s %-12s FAILED (%s)\n    %s\n' "$1" "$2" "$3" "${4//$'\n'/$'\n'    }"
+  git -C "$1" log -1 --format='%h %cs' 2>/dev/null || echo "(empty repo — nothing pushed)"
 }
 
 fetch_one() {
-    local student="$1" task="$2" full url dir err
-    full="$(repo_path "$student" "$task")"
-    dir="$student/$task"
+  local student="$1" task="$2" dir="$1/$2" err
 
-    if [[ "$PROTO" == "ssh" ]]; then
-        url="git@$HOST:$full.git"
-    else
-        url="https://$HOST/$full.git"
-    fi
+  ((RECLONE)) && rm -rf "$dir"
 
-    ((RECLONE)) && rm -rf "$dir"
+  if [[ ! -d "$dir/.git" ]]; then
+    mkdir -p "$student"
+    err=$(git clone --quiet "$BASE/$student-$task.git" "$dir" 2>&1) || {
+      fail "$student" "$task" "$err"
+      return 1
+    }
+    say "$student" "$task" "cloned   $(head_desc "$dir")"
+    return 0
+  fi
 
-    if [[ -d "$dir/.git" ]]; then
-        if ! err=$(git -C "$dir" fetch --quiet --prune origin 2>&1); then
-            report_err "$student" "$task" "$full" "$err"
-            return 1
-        fi
-        if git -C "$dir" symbolic-ref -q HEAD >/dev/null \
-            && git -C "$dir" rev-parse -q --verify '@{u}' >/dev/null 2>&1 \
-            && ! git -C "$dir" merge --ff-only --quiet '@{u}' 2>/dev/null; then
-            printf '%-20s %-12s diverged (left alone)\n' "$student" "$task"
-            return 0
-        fi
-        printf '%-20s %-12s updated  %s\n' "$student" "$task" "$(head_desc "$dir")"
-    else
-        mkdir -p "$student"
-        if ! err=$(git clone --quiet "$url" "$dir" 2>&1); then
-            report_err "$student" "$task" "$full" "$err"
-            return 1
-        fi
-        printf '%-20s %-12s cloned   %s\n' "$student" "$task" "$(head_desc "$dir")"
-    fi
+  err=$(git -C "$dir" fetch --quiet --prune origin 2>&1) || {
+    fail "$student" "$task" "$err"
+    return 1
+  }
+
+  if ! git -C "$dir" rev-parse -q --verify '@{u}' >/dev/null 2>&1 ||
+    git -C "$dir" merge --ff-only --quiet '@{u}' 2>/dev/null; then
+    say "$student" "$task" "updated  $(head_desc "$dir")"
+  else
+    say "$student" "$task" "diverged (left alone)"
+  fi
 }
 
-export -f fetch_one repo_path report_err head_desc
-export HOST ORG PROTO RECLONE
-export GIT_TERMINAL_PROMPT=0
-
-mapfile -t STUDENTS < <(
-    sed -e 's/\r$//' -e 's/#.*//' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' \
-        "$STUDENTS_FILE" | grep -v '^$' | awk '!seen[$0]++'
-)
-((${#STUDENTS[@]})) || {
-    echo "Error: no student ids in $STUDENTS_FILE." >&2
-    exit 1
-}
-
-JOBS=$({ nproc || sysctl -n hw.ncpu; } 2>/dev/null || echo 4)
-TOTAL=$((${#STUDENTS[@]} * ${#TASKS[@]}))
+export -f fetch_one say fail head_desc
+export BASE RECLONE GIT_TERMINAL_PROMPT=0
 
 echo "${TASKS[*]}: ${#STUDENTS[@]} students, $TOTAL repos, $JOBS parallel jobs"
 ((RECLONE)) && echo "re-cloning from scratch"
 echo
 
+status=0
 for task in "${TASKS[@]}"; do
-    for student in "${STUDENTS[@]}"; do
-        printf '%s\0%s\0' "$student" "$task"
-    done
-done | xargs -0 -P "$JOBS" -n 2 bash -c 'fetch_one "$@"' _
-status=$?
+  printf '%s\n' "${STUDENTS[@]}" |
+    xargs -P "$JOBS" -I{} bash -c 'fetch_one "$@"' _ {} "$task" || status=1
+done
 
 echo
 if ((status == 0)); then
-    echo "All $TOTAL repos fetched."
+  echo "All $TOTAL repos fetched."
 else
-    echo "Finished with failures — see the lines above."
+  echo "Finished with failures — see the lines above."
 fi

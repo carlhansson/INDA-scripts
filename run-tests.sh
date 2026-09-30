@@ -1,21 +1,28 @@
 #!/usr/bin/env bash
 #   ./run-tests.sh task-1                 run 0-master/task-1's tests on every student's task-1
 #   ./run-tests.sh task-1 alialk eej      only test the listed students
-#
+#   ./run-tests.sh -f task-1              fetch the tests again, then run them
 set -uo pipefail
 
-MASTER_DIR="./0-master"          # folder holding <task-name>/ with the *Test.java files
+MASTER_DIR="./0-master"          # folder holding <task-name>/ inda master git repo with solutions branch
 LIB_DIRS=("." "/usr/share/java") # searched in order for junit*.jar and hamcrest*.jar
 TEST_TIMEOUT=10                  # seconds a single test may run before it counts as failed
+
+HOST="gits-15.sys.kth.se" # GitHub Enterprise hostname
+ORG="inda-master"         # organization owning the master repos
+BRANCH="solutions"        # branch in the master repo that holds the tests
 
 STUDENTS_FILE="students.txt"
 
 usage() {
   cat <<EOF
-Usage: ${0##*/} <task-name> [student-id ...]
+Usage: ${0##*/} [-f] <task-name> [student-id ...]
 
 Runs every *Test.java under $MASTER_DIR/<task-name>/ against each student's
 ./<student-id>/<task-name>/ and prints a report with one section per student.
+
+If $MASTER_DIR/<task-name>/ has no *Test.java files, the $BRANCH branch of
+git@$HOST:$ORG/<task-name>.git is cloned there first.
 
 A test file tests the student file with the same name minus "Test", at the same
 relative path: src/HelloWorldTest.java tests ./<student-id>/<task-name>/src/HelloWorld.java.
@@ -26,19 +33,23 @@ Students are the ids given after the task name, or every id in ./$STUDENTS_FILE
 that has them, in this order: ${LIB_DIRS[*]}
 
 Options:
+  -f    Fetch the tests again from the $BRANCH branch, even if they
+        are already in $MASTER_DIR/<task-name>/
   -h    Show this help
 
-Master folder, jar folders and the per-test timeout are set in the
-configuration block at the top of the script.
+Master folder, jar folders, the per-test timeout and the git host, organization
+and branch are set in the configuration block at the top of the script.
 EOF
 }
 
-while getopts ':h' opt; do
+REFETCH=0
+while getopts ':hf' opt; do
   case "$opt" in
     h)
       usage
       exit 0
       ;;
+    f) REFETCH=1 ;;
     *)
       echo "Unknown option: -$OPTARG" >&2
       usage >&2
@@ -57,10 +68,37 @@ TASK="$1"
 shift
 TEST_ROOT="$MASTER_DIR/$TASK"
 
-[[ -d "$TEST_ROOT" ]] || {
-  echo "Error: no test folder $TEST_ROOT." >&2
-  exit 1
+has_tests() { # true if TEST_ROOT has at least one *Test.java
+  [[ -n $(find "$TEST_ROOT" -name .git -prune -o -type f -name '*Test.java' -print -quit 2>/dev/null) ]]
 }
+
+fetch_tests() { # clones TEST_ROOT, or resets an existing clone to the latest $BRANCH
+  local url="git@$HOST:$ORG/$TASK.git"
+  command -v git >/dev/null || {
+    echo "Error: git not found." >&2
+    return 1
+  }
+  if [[ -d "$TEST_ROOT/.git" ]]; then
+    echo "Fetching $BRANCH from $url into $TEST_ROOT" >&2
+    git -C "$TEST_ROOT" fetch -q origin "$BRANCH" &&
+      git -C "$TEST_ROOT" checkout -q -f -B "$BRANCH" FETCH_HEAD
+  elif [[ -e "$TEST_ROOT" ]]; then
+    echo "Error: $TEST_ROOT exists but is not a git repo; move it away to fetch the tests." >&2
+    return 1
+  else
+    echo "Cloning $BRANCH from $url into $TEST_ROOT" >&2
+    mkdir -p "$MASTER_DIR" &&
+      git clone -q --branch "$BRANCH" "$url" "$TEST_ROOT"
+  fi
+}
+
+if ((REFETCH)) || ! has_tests; then
+  fetch_tests || {
+    echo "Error: could not fetch the tests for $TASK." >&2
+    exit 1
+  }
+fi
+
 command -v javac >/dev/null && command -v java >/dev/null ||
   {
     echo "Error: java/javac not found." >&2

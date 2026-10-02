@@ -95,7 +95,7 @@ if ((GENERATE)); then
     echo "Error: no readable $STUDENTS_FILE in $PWD." >&2
     exit 1
   }
-  mapfile -t STUDENTS < <(sed 's/#.*//' "$STUDENTS_FILE" | tr -d '\r' | awk 'NF && !seen[$1]++ { print $1 }')
+  mapfile -t STUDENTS < <(sed 's/#.*//' "$STUDENTS_FILE" | tr -d '\r' | awk 'NF { print $1 }' | sort -u)
   ((${#STUDENTS[@]})) || {
     echo "Error: no student ids in $STUDENTS_FILE." >&2
     exit 1
@@ -180,12 +180,16 @@ echo
 
 pushed=0 skipped=0 failed=0 aborted=0
 
-for ((i = 0; i < TOTAL; i++)); do
+# go through the issues sorted by student id, whatever order the file has them in
+mapfile -t ORDER < <(for i in "${!IDS[@]}"; do printf '%s\t%s\n' "${IDS[i]}" "$i"; done | sort -s -t$'\t' -k1,1 | cut -f2)
+
+for ((n = 0; n < TOTAL; n++)); do
+  i="${ORDER[n]}"
   id="${IDS[i]}" title="${TITLES[i]}" body="${BODIES[i]}"
   repo="$(repo_path "$id" "$TASK")"
 
   printf '%s\n' "${DIM}────────────────────────────────────────────────────────${R}"
-  printf '%s  (%d/%d)\n' "${B}https://$HOST/$repo/issues${R}" "$((i + 1))" "$TOTAL"
+  printf '%s  (%d/%d)\n' "${B}https://$HOST/$repo/issues${R}" "$((n + 1))" "$TOTAL"
   printf '%s\n\n' "${B}$title${R}"
   if [[ -n "$body" ]]; then
     printf '%s\n\n' "$body"
@@ -245,7 +249,7 @@ for ((i = 0; i < TOTAL; i++)); do
       ;;
     q | quit)
       echo "${YELLOW}aborted — remaining issues left alone${R}"
-      aborted=$((TOTAL - i))
+      aborted=$((TOTAL - n))
       break
       ;;
     *)

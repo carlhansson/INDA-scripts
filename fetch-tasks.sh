@@ -78,10 +78,10 @@ else
 fi
 
 if ((${#ONLY[@]})); then
-  mapfile -t STUDENTS < <(printf '%s\n' "${ONLY[@]}" | awk 'NF && !seen[$1]++ { print $1 }')
+  mapfile -t STUDENTS < <(printf '%s\n' "${ONLY[@]}" | awk 'NF { print $1 }' | sort -u)
 else
   [[ -r "$STUDENTS_FILE" ]] || die "no readable $STUDENTS_FILE in $PWD."
-  mapfile -t STUDENTS < <(sed 's/#.*//' "$STUDENTS_FILE" | tr -d '\r' | awk 'NF && !seen[$1]++ { print $1 }')
+  mapfile -t STUDENTS < <(sed 's/#.*//' "$STUDENTS_FILE" | tr -d '\r' | awk 'NF { print $1 }' | sort -u)
 fi
 ((${#STUDENTS[@]})) || die "no student ids in $STUDENTS_FILE."
 
@@ -145,14 +145,25 @@ fetch_one() {
 export -f fetch_one say fail head_desc
 export BASE RECLONE R RED GREEN YELLOW GIT_TERMINAL_PROMPT=0
 
+WORK=$(mktemp -d) || exit 1
+trap 'rm -rf "$WORK"' EXIT
+[[ -t 2 ]] && PROGRESS=1 || PROGRESS=""
+export WORK PROGRESS
+
 echo "${TASKS[*]}: ${#STUDENTS[@]} students, $TOTAL repos, $JOBS parallel jobs"
 ((RECLONE)) && echo "re-cloning from scratch"
 echo
 
 status=0
 for task in "${TASKS[@]}"; do
+  # jobs finish in any order, so each one writes to its own file and they are printed sorted
+  [[ -n "$PROGRESS" ]] && printf 'fetching %s ' "$task" >&2
   printf '%s\n' "${STUDENTS[@]}" |
-    xargs -P "$JOBS" -I{} bash -c 'fetch_one "$@"' _ {} "$task" || status=1
+    xargs -P "$JOBS" -I{} bash -c 'fetch_one "$@" >"$WORK/$1" 2>&1; rc=$?; [[ -z "$PROGRESS" ]] || printf . >&2; exit $rc' _ {} "$task" || status=1
+  [[ -n "$PROGRESS" ]] && printf '\r\033[K' >&2
+  for student in "${STUDENTS[@]}"; do
+    cat "$WORK/$student" 2>/dev/null
+  done
 done
 
 echo

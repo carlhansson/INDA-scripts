@@ -144,7 +144,7 @@ CP=$(printf '%s\n' "$JUNIT" "$HAMCREST" | paste -sd: -)
 
 ONLY+=("$@")
 if ((${#ONLY[@]})); then
-  mapfile -t STUDENTS < <(printf '%s\n' "${ONLY[@]}" | awk 'NF && !seen[$1]++ { print $1 }')
+  mapfile -t STUDENTS < <(printf '%s\n' "${ONLY[@]}" | awk 'NF { print $1 }' | sort -u)
 else
   [[ -r "$STUDENTS_FILE" ]] || {
     echo "Error: no readable $STUDENTS_FILE in $PWD." >&2
@@ -152,7 +152,7 @@ else
   }
   mapfile -t STUDENTS < <(
     sed -e 's/\r$//' -e 's/#.*//' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' \
-      "$STUDENTS_FILE" | grep -v '^$' | awk '!seen[$0]++'
+      "$STUDENTS_FILE" | grep -v '^$' | sort -u
   )
   ((${#STUDENTS[@]})) || {
     echo "Error: no student ids in $STUDENTS_FILE." >&2

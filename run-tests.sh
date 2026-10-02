@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-#   ./run-tests.sh task-1                 run 0-master/task-1's tests on every student's task-1
-#   ./run-tests.sh task-1 alialk eej      only test the listed students
-#   ./run-tests.sh -f task-1              fetch the tests again, then run them
+#   ./run-tests.sh task-1                    run 0-master/task-1's tests on every student's task-1
+#   ./run-tests.sh task-1 carlhans meya      only test the listed students
+#   ./run-tests.sh -s carlhans,meya task-1   same, with -s
+#   ./run-tests.sh -f task-1                 fetch the tests again, then run them
 set -uo pipefail
 
 MASTER_DIR="./0-master"          # folder holding <task-name>/ inda master git repo with solutions branch
@@ -16,7 +17,7 @@ STUDENTS_FILE="students.txt"
 
 usage() {
   cat <<EOF
-Usage: ${0##*/} [-f] <task-name> [student-id ...]
+Usage: ${0##*/} [-f] [-s student-id[,student-id ...]] <task-name> [student-id ...]
 
 Runs every *Test.java under $MASTER_DIR/<task-name>/ against each student's
 ./<student-id>/<task-name>/ and prints a report with one section per student.
@@ -28,13 +29,15 @@ A test file tests the student file with the same name minus "Test", at the same
 relative path: src/HelloWorldTest.java tests ./<student-id>/<task-name>/src/HelloWorld.java.
 If the file is somewhere else in the repo, that copy is tested and a note is shown.
 
-Students are the ids given after the task name, or every id in ./$STUDENTS_FILE
+Students are the ids given with -s and/or after the task name, or every id in ./$STUDENTS_FILE
 (one id per row). JUnit 4 and Hamcrest jars are taken from the first folder
 that has them, in this order: ${LIB_DIRS[*]}
 
 Options:
   -f    Fetch the tests again from the $BRANCH branch, even if they
         are already in $MASTER_DIR/<task-name>/
+  -s    Only test these students instead of everyone in $STUDENTS_FILE;
+        separate ids with commas or spaces, or repeat -s
   -h    Show this help
 
 Master folder, jar folders, the per-test timeout and the git host, organization
@@ -43,13 +46,23 @@ EOF
 }
 
 REFETCH=0
-while getopts ':hf' opt; do
+ONLY=()
+while getopts ':hfs:' opt; do
   case "$opt" in
     h)
       usage
       exit 0
       ;;
     f) REFETCH=1 ;;
+    s)
+      read -ra ids <<<"${OPTARG//,/ }"
+      ONLY+=("${ids[@]}")
+      ;;
+    :)
+      echo "Option -$OPTARG needs an argument." >&2
+      usage >&2
+      exit 2
+      ;;
     *)
       echo "Unknown option: -$OPTARG" >&2
       usage >&2
@@ -129,8 +142,9 @@ HAMCREST=$(find_jars 'hamcrest*.jar') || {
 }
 CP=$(printf '%s\n' "$JUNIT" "$HAMCREST" | paste -sd: -)
 
-if (($#)); then
-  STUDENTS=("$@")
+ONLY+=("$@")
+if ((${#ONLY[@]})); then
+  mapfile -t STUDENTS < <(printf '%s\n' "${ONLY[@]}" | awk 'NF && !seen[$1]++ { print $1 }')
 else
   [[ -r "$STUDENTS_FILE" ]] || {
     echo "Error: no readable $STUDENTS_FILE in $PWD." >&2

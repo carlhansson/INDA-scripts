@@ -24,7 +24,7 @@ the -r option.
 
 Options:
   -r    Re-clone from scratch: delete existing clones first
-  -s    Only fetch these students instead of everyone in $STUDENTS_FILE;
+  -s    Only fetch these students instead of everyone in $STUDENTS_FILE,
         separate ids with commas or spaces, or repeat -s
   -h    Show this help
 

@@ -2,12 +2,15 @@
 #   ./push-feedback.sh task-1          review and push every issue in feedback/task-1.md
 #   ./push-feedback.sh -d task-1       dry run: show what would be pushed, push nothing
 #   ./push-feedback.sh -y task-1       no confirmation prompts (use with care)
+#   ./push-feedback.sh -g task-1       generate feedback/task-1.md with a header for every student
 #
 set -uo pipefail
 
 HOST="gits-15.sys.kth.se"   # GitHub Enterprise hostname
 ORG="inda-26"               # organization owning the repos
 FEEDBACK_DIR="./0-feedback" # folder holding <task-name>.md feedback files
+STUDENTS_FILE="students.txt"
+DEFAULT_TITLE="Komp" # issue title put on every header by -g
 
 repo_path() {
   local student="$1" task="$2"
@@ -16,10 +19,12 @@ repo_path() {
 
 DRY_RUN=0
 ASSUME_YES=0
+GENERATE=0
 
 usage() {
   cat <<EOF
-Usage: ${0##*/} [-n] [-y] <task-name>
+Usage: ${0##*/} [-d] [-y] <task-name>
+       ${0##*/} -g <task-name>
 
 Reads $FEEDBACK_DIR/<task-name>.md, splits it into one issue per student and
 creates each issue in repo https://$HOST/$ORG/<student-id>-<task-name>.
@@ -46,16 +51,20 @@ The header is #<student-id>#<issue title>. Ordinary markdown headings (\`# Headi
 Options:
   -d    Dry run: print each issue but never create anything
   -y    Assume yes: skip the per-issue confirmation
+  -g    Generate $FEEDBACK_DIR/<task-name>.md with an empty
+        #<student-id>#$DEFAULT_TITLE section for every id in ./$STUDENTS_FILE,
+        then exit. An existing file is never overwritten.
   -h    Show this help
 
 Host/org/feedback folder are set in the configuration block at the top.
 EOF
 }
 
-while getopts ':dyh' opt; do
+while getopts ':dygh' opt; do
   case "$opt" in
     d) DRY_RUN=1 ;;
     y) ASSUME_YES=1 ;;
+    g) GENERATE=1 ;;
     h)
       usage
       exit 0
@@ -76,6 +85,28 @@ shift $((OPTIND - 1))
 }
 TASK="$1"
 FILE="$FEEDBACK_DIR/$TASK.md"
+
+if ((GENERATE)); then
+  [[ -e "$FILE" ]] && {
+    echo "Error: $FILE already exists, not overwriting it." >&2
+    exit 1
+  }
+  [[ -r "$STUDENTS_FILE" ]] || {
+    echo "Error: no readable $STUDENTS_FILE in $PWD." >&2
+    exit 1
+  }
+  mapfile -t STUDENTS < <(sed 's/#.*//' "$STUDENTS_FILE" | tr -d '\r' | awk 'NF && !seen[$1]++ { print $1 }')
+  ((${#STUDENTS[@]})) || {
+    echo "Error: no student ids in $STUDENTS_FILE." >&2
+    exit 1
+  }
+  mkdir -p "$FEEDBACK_DIR" || exit 1
+  for id in "${STUDENTS[@]}"; do
+    printf '#%s#%s\n\n\n' "$id" "$DEFAULT_TITLE"
+  done >"$FILE" || exit 1
+  echo "Created $FILE with ${#STUDENTS[@]} student section(s)."
+  exit 0
+fi
 
 [[ -r "$FILE" ]] || {
   echo "Error: no readable $FILE." >&2
